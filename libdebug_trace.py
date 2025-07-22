@@ -87,18 +87,12 @@ def dump_registers_to_file(d:object, f:io.TextIOBase):
 def format_rflags_string(rflags_value):
     """
     解析 RFLAGS 寄存器值，并以字符串形式返回关键标志位的状态。
-
-    Args:
-        rflags_value (int): RFLAGS 寄存器的整数值。
-
-    Returns:
-        str: 包含 ZF, SF, CF, OF 状态的格式化字符串，例如 "ZF=1 SF=0 CF=0 OF=0"。
     """
     # 提取各个标志位
-    zf = (rflags_value >> 6) & 1  # Zero Flag (位 6)
-    sf = (rflags_value >> 7) & 1  # Sign Flag (位 7)
-    cf = (rflags_value >> 0) & 1  # Carry Flag (位 0)
-    of = (rflags_value >> 11) & 1 # Overflow Flag (位 11)
+    zf = (rflags_value >> 6) & 1
+    sf = (rflags_value >> 7) & 1
+    cf = (rflags_value >> 0) & 1
+    of = (rflags_value >> 11) & 1
 
     # 格式化为字符串
     flags_str = f"ZF={hex(zf)} SF={hex(sf)} CF={hex(cf)} OF={hex(of)}"
@@ -239,7 +233,7 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
                      auto_interrupt_on_command=True, continue_to_binary_entrypoint=False,escape_antidebug=True,env=env)
     p = d.run()
     pid = d.pid
-    
+
     # d.pprint_maps()
 
     global count
@@ -432,9 +426,6 @@ def main():
     #     print(f"Environment variables: {env_dict}")
     # else:
     #     print("No environment variables set")
-
-
-    
 
 if __name__ == '__main__':
     main()
