@@ -22,7 +22,7 @@ def exit_program(d:object):
     """
     当计时器超时时执行的函数，用于退出程序。
     """
-    print(f"error")
+    print(f"error 开始地址不正确，程序可能运行不到这个开始地址，请重新设置")
     os.kill(d.pid,signal.SIGKILL)
     exit(1)
 
@@ -84,6 +84,27 @@ def dump_registers_to_file(d:object, f:io.TextIOBase):
         f.write(f"ymm{i}=0x{ymm:x}    ")
     f.write("\n-----------\n")
 
+def format_rflags_string(rflags_value):
+    """
+    解析 RFLAGS 寄存器值，并以字符串形式返回关键标志位的状态。
+
+    Args:
+        rflags_value (int): RFLAGS 寄存器的整数值。
+
+    Returns:
+        str: 包含 ZF, SF, CF, OF 状态的格式化字符串，例如 "ZF=1 SF=0 CF=0 OF=0"。
+    """
+    # 提取各个标志位
+    zf = (rflags_value >> 6) & 1  # Zero Flag (位 6)
+    sf = (rflags_value >> 7) & 1  # Sign Flag (位 7)
+    cf = (rflags_value >> 0) & 1  # Carry Flag (位 0)
+    of = (rflags_value >> 11) & 1 # Overflow Flag (位 11)
+
+    # 格式化为字符串
+    flags_str = f"ZF={hex(zf)} SF={hex(sf)} CF={hex(cf)} OF={hex(of)}"
+    
+    return flags_str
+
 def get_binary_name(filepath):
     """
     获取程序的名称
@@ -102,7 +123,7 @@ def get_libs_info(d,binary_file_name):
             path = m.backing_file
             if not path or not path.startswith("/"):
                 continue
-            if "ld-linux-x86-64.so.2" in path or binary_file_name in path:
+            if binary_file_name in path:
                 continue
             if path not in libs_info:
                 lib_name = path.split("/")[-1]
@@ -174,13 +195,17 @@ def handle_lib_func(d,ripaddr, f, lib_info, binary_info):
                 func_name = lib_info[lib_path]["symbol"][ripaddr]
             else:
                 func_name = f"unknown_lib_function({lib_info[lib_path]["name"]})"
-            f.write(f"{hex(ripaddr)}\t{lib_info[lib_path]["name"]}+{hex(ripaddr-libc_base)}\t{func_name}\n")
+            f.write(f"{hex(ripaddr)}\t{lib_info[lib_path]["name"]}!{hex(ripaddr-libc_base)}\t{func_name:<6}\n")
+
             # print(func_name,ret_addr)
             try:
                 while(1):
                     d.step()
                     rip = d.regs.rip
                     # f.write(f"{hex(rip)}\n")
+                    if "ld-linux-x86-64.so.2" in lib_path:
+                        if rip < lib_info[lib_path]["base"] or rip > lib_info[lib_path]["end"]:
+                            return 1
                     if rip >= binary_info["base"] and rip <= binary_info["end"]:
                         return 1
                     # handle_lib_func(d,rip, f, lib_info, binary_info)
@@ -215,7 +240,7 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
     p = d.run()
     pid = d.pid
     
-    d.pprint_maps()
+    # d.pprint_maps()
 
     global count
     count = 0
@@ -268,6 +293,7 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
     lib_info = get_libs_info(d,binary_file_name)
     dump_registers_to_file(d, f)
     
+    binary_nick_name = f"\'{binary_file_name}\'" if len(binary_file_name) < 12 else f"\'{binary_file_name[0:10:] + ".."}\'"
     for i in tqdm(range(maxlen)):
         ripaddr = rip()
 
@@ -295,11 +321,6 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
         if reg_name in x64_regs:
             d.step()
             reg_str = ''.join(f"{reg_name:<3}={getattr(d.regs,reg_name):#018x}")
-
-        # 遇到call时打印参数寄存器
-        elif mnemonic == "call":
-            d.step()
-            reg_str = " ".join(f"{r:<3}={getattr(d.regs,r):#018x}" for r in args_regs)
 
         # 处理指针，内存访问
         elif "["in reg_name:
@@ -333,7 +354,22 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
                     d.step()
         else:
             d.step()
-        f.write(f"{hex(ripaddr)}\toff: {hex(ripaddr-base_addr)}\t{mnemonic:<6}\t{op_str:<30}\t{reg_str}\n")
+
+                # 遇到call时打印参数寄存器
+        if mnemonic == "call":
+            d.step()
+            reg_str = " ".join(f"{r:<3}={getattr(d.regs,r):#018x}" for r in args_regs)
+
+        # 遇到cmp时输出标志位
+        elif mnemonic == "cmp" or mnemonic == "":
+            d.step()
+            reg_str += " " + format_rflags_string(d.regs.eflags)
+
+
+        if ripaddr >= binary_info["base"] and ripaddr <= binary_info["end"]:
+            f.write(f"{hex(ripaddr)}\t{binary_nick_name}!{hex(ripaddr-base_addr)}\t{mnemonic:<6}\t{op_str:<30}\t{reg_str}\n")
+        else:
+            f.write(f"{hex(ripaddr)}\t!unkonwn_file\t{mnemonic:<6}\t{op_str:<30}\t{reg_str}\n")
     f.close()
     d.kill()
 
