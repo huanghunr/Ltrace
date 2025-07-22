@@ -131,15 +131,8 @@ def handle_lib_func(d,ripaddr,f,lib_info,ret_addr,binary_info):
             libc_base = lib_info[lib_path]["base"]
             libc_end = lib_info[lib_path]["end"]
             if ripaddr >= libc_base and ripaddr <= libc_end:
-                # rsp = d.regs.rsp
-                # ret_addr = int.from_bytes(d.memory[rsp : rsp + 8], "little")
                 if ripaddr in lib_info[lib_path]["symbol"]:
                     func_name = lib_info[lib_path]["symbol"][ripaddr]
-                    # if func_name == "__libc_start_main":
-                    #     ret_addr = d.regs.rdi
-
-                    # elif "jmp" in func_name:
-                    #     return -1
                 else:
                     func_name = f"unknown_lib_function({lib_info[lib_path]["name"]})"
                 f.write(f"{hex(ripaddr)}\tlibc+{hex(ripaddr-libc_base)}\t{func_name}\n")
@@ -150,11 +143,6 @@ def handle_lib_func(d,ripaddr,f,lib_info,ret_addr,binary_info):
                     if rip >= binary_info["base"] and rip <= binary_info["end"]:
                         return 1
         return 0
-    # else:
-    #     if ripaddr >= binary_info["base"] and ripaddr <= binary_info["end"]:
-    #         global handle_lib_func_enable
-    #         handle_lib_func_enable = True
-    #     return 0
 
 def trace_file(filepath:str, args: str, startaddr:int, maxlen:int, output:str, env:dict, inputdata:list):
 
@@ -221,15 +209,8 @@ def trace_file(filepath:str, args: str, startaddr:int, maxlen:int, output:str, e
         # print(mnemonic,op_str)
 
         lib_func_handler=handle_lib_func(d,ripaddr,f,lib_info,ret_addr,binary_info)
-        if lib_func_handler == 1: 
-            continue
-        # elif lib_func_handler == -1:
-        #     global handle_lib_func_enable
-        #     handle_lib_func_enable = False
-        # else:
-        #     None
+        if lib_func_handler: continue
 
-        # d.step()
         reg_str = ""
         reg_name = registers[0]
         if reg_name in x64_regs:
