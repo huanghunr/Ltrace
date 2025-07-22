@@ -99,6 +99,13 @@ def format_rflags_string(rflags_value):
     
     return flags_str
 
+def pass_ptrace(d):
+    def ptrace_handler(d):
+        d.regs.rax = 0
+        print("hit")
+        return
+    d.handle_syscall("ptrace",on_exit=ptrace_handler(d))
+
 def get_binary_name(filepath):
     """
     获取程序的名称
@@ -189,7 +196,7 @@ def handle_lib_func(d,ripaddr, f, lib_info, binary_info):
                 func_name = lib_info[lib_path]["symbol"][ripaddr]
             else:
                 func_name = f"unknown_lib_function({lib_info[lib_path]["name"]})"
-            f.write(f"{hex(ripaddr)}\t{lib_info[lib_path]["name"]}!{hex(ripaddr-libc_base)}\t{func_name:<6}\n")
+            f.write(f"{hex(ripaddr)}\t\'{lib_info[lib_path]["name"]}\'!{hex(ripaddr-libc_base)}\t{func_name:<6}\n")
 
             # print(func_name,ret_addr)
             try:
@@ -246,6 +253,7 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
 
     # hook read的系统调用
     if len(inputdata) > 0: d.handle_syscall("read",on_enter=handle_read(inputdata))
+    # pass_ptrace(d)
 
     rip  = lambda: d.regs.rip
     
