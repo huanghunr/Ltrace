@@ -588,7 +588,7 @@ def parse_args():
     group.add_argument('-f', '--file', type=str, help='需要启动的程序路径')
     group.add_argument('-p', '--pid', type=int, help='要attach的进程ID')
 
-    parser.add_argument("-F", "--filepath", help="程序文件路径(在通过pid附加时必须使用)", type=str, default="")
+    parser.add_argument("-F", "--filepath", help="程序文件路径(在通过pid附加时必须使用，通过文件启动请使用 -f)", type=str, default="")
 
     # 可选参数，指定开始trace的地址(十六进制的相对地址)，默认从程序的入口点开始。例如：0x1231
     parser.add_argument('-s', '--start', type=lambda x: int(x, 0), default=0,
