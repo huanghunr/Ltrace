@@ -1,5 +1,6 @@
 # Ltrace
 Ltrace 是一个在linux x64下基于capstone和libdebug开发的指令trace工具。它拥有超快的速度，和一定的反混淆反反调试能力。
+
 项目还在开发中，这里是demo
 
 使用方法
@@ -21,7 +22,11 @@ options:
   -i, --input [INPUT ...]
                         Inputs to be passed to the program via stdin (multiple inputs separated by space)
 ```
-
+未来计划
+1.兼容x32
+2.添加更多的反调试绕过功能
+3.性能优化
+4.跳转提示
 
 ## 感谢
 [libdebug](https://github.com/libdebug/libdebug/tree/d88a893963d02482e00d4516bdaf4f25a8c14c4b)

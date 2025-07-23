@@ -1,11 +1,8 @@
 from libdebug import debugger
-from libdebug import libcontext
 from ctypes import * 
 import os
 import signal
 import threading
-import time
-import io
 from capstone import *
 from capstone.x86 import *
 from tqdm import tqdm
@@ -18,7 +15,7 @@ context.log_level ="error"
 # libcontext.sym_lvl = 4
 TIMEOUT = 5
 
-def exit_program(d:object):
+def exit_program(d):
     """
     当计时器超时时执行的函数，用于退出程序。
     """
@@ -48,7 +45,24 @@ x64_regs = [
     "ah", "bh", "ch", "dh"
 ]
 
-def dump_registers_to_file(d:object, f:io.TextIOBase):
+def format_rflags_string(rflags_value):
+    """
+    解析 RFLAGS 寄存器值，并以字符串形式返回关键标志位的状态。
+    """
+    # 提取各个标志位
+    zf = (rflags_value >> 6) & 1
+    sf = (rflags_value >> 7) & 1
+    cf = (rflags_value >> 0) & 1
+    of = (rflags_value >> 11) & 1
+    pf = (rflags_value >> 2) & 1
+    af = (rflags_value >> 4) & 1
+
+    # 格式化为字符串
+    flags_str = f"ZF={hex(zf)} SF={hex(sf)} CF={hex(cf)} OF={hex(of) } PF={hex(pf)} AF={hex(af)}"
+    
+    return flags_str
+
+def dump_registers_to_file(d, f):
     """
     打印寄存器的初始值
     """
@@ -69,6 +83,8 @@ def dump_registers_to_file(d:object, f:io.TextIOBase):
             line += f"{reg:<8} 0x{val:016x}    "
         f.write(line.rstrip() + "\n")
 
+    f.write(format_rflags_string(regs.eflags) + "\n")
+
     # MMX/ST 
     for i in range(8):
         mm = getattr(regs, f"mm{i}")
@@ -83,21 +99,6 @@ def dump_registers_to_file(d:object, f:io.TextIOBase):
         f.write(f"xmm{i}=0x{xmm:x}    ")
         f.write(f"ymm{i}=0x{ymm:x}    ")
     f.write("\n-----------\n")
-
-def format_rflags_string(rflags_value):
-    """
-    解析 RFLAGS 寄存器值，并以字符串形式返回关键标志位的状态。
-    """
-    # 提取各个标志位
-    zf = (rflags_value >> 6) & 1
-    sf = (rflags_value >> 7) & 1
-    cf = (rflags_value >> 0) & 1
-    of = (rflags_value >> 11) & 1
-
-    # 格式化为字符串
-    flags_str = f"ZF={hex(zf)} SF={hex(sf)} CF={hex(cf)} OF={hex(of)}"
-    
-    return flags_str
 
 def pass_ptrace(d):
     def ptrace_handler(d):
@@ -197,20 +198,16 @@ def handle_lib_func(d,ripaddr, f, lib_info, binary_info):
             else:
                 func_name = f"unknown_lib_function({lib_info[lib_path]["name"]})"
             f.write(f"{hex(ripaddr)}\t\'{lib_info[lib_path]["name"]}\'!{hex(ripaddr-libc_base)}\t{func_name:<6}\n")
-
-            # print(func_name,ret_addr)
             try:
                 while(1):
                     d.step()
                     rip = d.regs.rip
-                    # f.write(f"{hex(rip)}\n")
+
                     if "ld-linux-x86-64.so.2" in lib_path:
                         if rip < lib_info[lib_path]["base"] or rip > lib_info[lib_path]["end"]:
                             return 1
                     if rip >= binary_info["base"] and rip <= binary_info["end"]:
                         return 1
-                    # handle_lib_func(d,rip, f, lib_info, binary_info)
-                    
             except RuntimeError as e:
                 if str(e) =="All threads are dead." or str(e) == "The thread is dead.":
                     print(f"追踪程序已运行结束。退出代码：{d.exit_code}; 退出信号：{d.exit_signal}")
@@ -228,7 +225,7 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
     
     md = Cs(CS_ARCH_X86, CS_MODE_64)
     md.detail = True
-    
+    # 取程序名称
     binary_file_name = get_binary_name(filepath)
 
     # 判断追踪程序是否需要输入参数
@@ -255,7 +252,14 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
     if len(inputdata) > 0: d.handle_syscall("read",on_enter=handle_read(inputdata))
     # pass_ptrace(d)
 
+    # 获取寄存器的值
     rip  = lambda: d.regs.rip
+    zf = lambda: (d.regs.eflags & 0x40) >> 6
+    sf = lambda: (d.regs.eflags & 0x80) >> 7
+    pf = lambda: (d.regs.eflags & 0x4) >> 2
+    cf = lambda: (d.regs.eflags & 0x1) >> 0
+    of = lambda: (d.regs.eflags & 0x800) >> 11
+    af = lambda: (d.regs.eflags & 0x10) >> 4
     
     # 获取二进制文件的信息，包括起止地址
     binary_info = get_binary_info(d,binary_file_name)
@@ -275,7 +279,6 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
             d.wait()
             if bp1.hit_on(d):
                 d.breakpoints[base_addr+startaddr].disable()
-                # print(hex(base_addr+startaddr),hex(rip()))
                 break
     else:
         entrypoint = get_entrypoint(filepath)
@@ -285,7 +288,6 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
             d.wait()
             if bp2.hit_on(d):
                 d.breakpoints[base_addr+entrypoint].disable()
-                # print(hex(base_addr+startaddr),hex(rip()))
                 break
 
     # 如果初始位置正确，取消计时器
@@ -297,9 +299,10 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
     
     binary_nick_name = f"\'{binary_file_name}\'" if len(binary_file_name) < 12 else f"\'{binary_file_name[0:10:] + ".."}\'"
     for i in tqdm(range(maxlen)):
+        # 检查最终是否已到最大值
         ripaddr = rip()
-
         try:
+            # 读取当前指令
             CODE = d.memory[ripaddr,16]
         except RuntimeError as e:
             if str(e) =="All threads are dead.":
@@ -309,23 +312,26 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
             else:
                 print("解析错误",e)
                 exit(1)
+        # 解析当前指令
         address, size, mnemonic, op_str = next(md.disasm_lite(CODE, 0x1))
+        # 获取标志位，用于跟踪指令执行前后的变化
+        flag_regs_before = {"OF": of(), "SF": sf(), "ZF": zf(), "CF": cf(), "PF": pf(), "AF": af()}
+        # 获取左右两边的操作数
         registers = [reg.strip() for reg in op_str.split(',')]
-        # print(mnemonic,op_str)
-        # print(binary_info)
+        # 处理标准库函数
         lib_func_handler=handle_lib_func(d,ripaddr,f,lib_info,binary_info)
         if lib_func_handler: continue
 
         # 右侧打印寄存器和内存
         reg_str = ""
         reg_name = registers[0]
-        # 直接打印寄存器
+        # 直接打印左侧操作数的寄存器
         if reg_name in x64_regs:
             d.step()
             reg_str = ''.join(f"{reg_name:<3}={getattr(d.regs,reg_name):#018x}")
 
         # 处理指针，内存访问
-        elif "["in reg_name:
+        elif "["in reg_name and mnemonic != "nop":
             # print(reg_name)
             insn = next(md.disasm(CODE,1))
             op = insn.operands[0]
@@ -335,38 +341,58 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
                 seg = insn.reg_name(op.mem.segment)
                 scale = op.mem.scale
                 disp = op.mem.disp
-                if not seg is None or mnemonic == "nop":
+                if not seg is None:
                     d.step()
                 elif index is None or index == "riz":
                     mem_addr = getattr(d.regs, base) + disp
+                    d.step()
+                    try:
+                        mem_data_qword = int.from_bytes(d.memory[(mem_addr&0xffffffffffffffff),8], "little")
+                        reg_str = f"mem={mem_data_qword:#018x}"
+                    except Exception as e:
+                        reg_str = f"mem=[get error]"
                 else:
                     mem_addr = getattr(d.regs, base) + getattr(d.regs, index) * scale + disp
-                try:
                     d.step()
-                    # print(hex(mem_addr),mnemonic,op_str,ripaddr)
-                    mem_data_qword = int.from_bytes(d.memory[(mem_addr&0xffffffffffffffff),8], "little")
-                    reg_str = f"mem={mem_data_qword:#018x}"
-                except Exception as e:
-                    # print(f"Error reading memory at {hex(mem_addr)}: {e},rip={hex(rip())}")
-                    # print(f"[{base} + {index}*{scale} + {hex(disp)}]")
-                    # d.pprint_regs()
-                    # d.print_maps()
-                    # exit(1)
-                    reg_str = f"mem=[get error]"
-                    d.step()
+                    try:
+                        mem_data_qword = int.from_bytes(d.memory[(mem_addr&0xffffffffffffffff),8], "little")
+                        reg_str = f"mem={mem_data_qword:#018x}"
+                    except Exception as e:
+                        # print(f"Error reading memory at {hex(mem_addr)}: {e},rip={hex(rip())}")
+                        # print(f"[{base} + {index}*{scale} + {hex(disp)}]")
+                        # d.pprint_regs()
+                        # d.print_maps()
+                        # exit(1)
+                        reg_str = f"mem=[get error]"
+                        # d.step()
+            else:
+                d.step()
         else:
             d.step()
 
-                # 遇到call时打印参数寄存器
+        # 遇到call时打印参数寄存器
         if mnemonic == "call":
-            d.step()
+            # d.step()
             reg_str = " ".join(f"{r:<3}={getattr(d.regs,r):#018x}" for r in args_regs)
 
-        # 遇到cmp时输出标志位
-        elif mnemonic == "cmp" or mnemonic == "":
-            d.step()
-            reg_str += " " + format_rflags_string(d.regs.eflags)
-
+        elif "j" in mnemonic and not "jmp" in mnemonic:
+            # d.step()
+            # 根据不同的跳转指令添加对应的标志位
+            if mnemonic == "js" or mnemonic == "jns":
+                reg_str += f" SF={sf()}"
+            elif mnemonic == "jo" or mnemonic == "jno":
+                reg_str += f" OF={of()}"
+            elif mnemonic == "jz" or mnemonic == "jnz":
+                reg_str += f" ZF={zf()}"
+            elif mnemonic == "jp" or mnemonic == "jnp":
+                reg_str += f" PF={pf()}"
+            elif mnemonic == "jc" or mnemonic == "jnc":
+                reg_str += f" CF={cf()}" 
+        
+        flag_regs_after = {"OF": of(), "SF": sf(), "ZF": zf(), "CF": cf(), "PF": pf(), "AF": af()}
+        for b,a in zip(flag_regs_before, flag_regs_after):
+            if flag_regs_before[b] != flag_regs_after[a]:
+                reg_str += f" {b}={hex(flag_regs_after[a])}"
 
         if ripaddr >= binary_info["base"] and ripaddr <= binary_info["end"]:
             f.write(f"{hex(ripaddr)}\t{binary_nick_name}!{hex(ripaddr-base_addr)}\t{mnemonic:<6}\t{op_str:<30}\t{reg_str}\n")
@@ -429,7 +455,7 @@ def main():
     # print(f"Max trace count: {args.max_trace}")
     # print(f"Output file: {args.output}")
 
-    # if args.env:
+    # if args.env: 
     #     env_dict = dict(item.split("=", 1) for item in args.env)
     #     print(f"Environment variables: {env_dict}")
     # else:
