@@ -30,7 +30,7 @@ pip install capstone libdebug pwntools pyelftools
 ### 使用方法
 
 ```
-usage: libdebug_trace.py [-h] (-f FILE | -p PID) [-F FILEPATH] [-s START] [-m MAX_TRACE] [-e [ENV ...]] [-o OUTPUT] [-i [INPUT ...]] [-a ...]
+usage: Ltrace.py [-h] (-f FILE | -p PID) [-F FILEPATH] [-s START] [-m MAX_TRACE] [-e [ENV ...]] [-o OUTPUT] [-i [INPUT ...]] [-a ...]
 
 Linux trace tool
 
