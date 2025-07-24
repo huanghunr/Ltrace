@@ -112,13 +112,6 @@ def dump_registers_to_file(d, f):
         f.write(f"ymm{i}=0x{ymm:x}    ")
     f.write("\n-----------\n")
 
-def pass_ptrace(d):
-    def ptrace_handler(d):
-        d.regs.rax = 0
-        print("hit")
-        return
-    d.handle_syscall("ptrace",on_exit=ptrace_handler(d))
-
 def get_binary_name(filepath):
     """
     获取程序的名称
@@ -197,7 +190,7 @@ def get_entrypoint(filepath):
         print(e)
         exit(0)
 
-def handle_lib_func(d,ripaddr, f, lib_info, binary_info):
+def handle_lib_func(d,ripaddr, f, lib_info, binary_info, pass_ptrace):
     """
     处理标准库函数
     """
@@ -216,9 +209,11 @@ def handle_lib_func(d,ripaddr, f, lib_info, binary_info):
                         print(f"追踪程序已退出。退出代码：{d.exit_code}; 退出信号：{d.exit_signal}")
                         f.close()
                         exit(0)
+                    # 处理ptrace反调试
+                    if pass_ptrace and d.syscall_number == 101 and d.syscall_arg0 == 0:
+                        d.syscall_return = 0
                     d.step()
                     rip = d.regs.rip
-
                     if "ld-linux-x86-64.so.2" in lib_path:
                         if rip < lib_info[lib_path]["base"] or rip > lib_info[lib_path]["end"]:
                             return 1
@@ -230,7 +225,7 @@ def handle_lib_func(d,ripaddr, f, lib_info, binary_info):
                     exit(0)
     return 0
 
-def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, env:dict, inputdata:list):
+def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, env:dict, inputdata:list, pass_ptrace:bool):
     """
     通过二进制文件启动追踪
     """
@@ -250,18 +245,9 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
     p = d.run()
     pid = d.pid
 
-    # d.pprint_maps()
-
-    global count
-    count = 0
-    # read系统调用的回调函数，处理程序标准输入
-    def handle_read(inputdata):
-        global count
-        p.sendline(inputdata[count].encode())
-        count += 1
-
-    # hook read的系统调用
-    if len(inputdata) > 0: d.handle_syscall("read",on_enter=handle_read(inputdata))
+    # 发送程序需要输入的数据
+    for i in range(len(inputdata)): 
+        p.sendline(inputdata[i].encode())
     # pass_ptrace(d)
 
     # 获取寄存器的值
@@ -332,7 +318,7 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
         # 获取左右两边的操作数
         registers = [reg.strip() for reg in op_str.split(',')]
         # 处理标准库函数
-        lib_func_handler=handle_lib_func(d,rip_addr,f,lib_info,binary_info)
+        lib_func_handler=handle_lib_func(d,rip_addr,f,lib_info,binary_info,pass_ptrace)
         if lib_func_handler: continue
 
         # 右侧打印寄存器和内存
@@ -401,6 +387,10 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
                 reg_str += f" PF={pf()}"
             elif mnemonic == "jc" or mnemonic == "jnc":
                 reg_str += f" CF={cf()}" 
+        # 处理ptrace反调试
+        elif mnemonic == "syscall":
+            if pass_ptrace and d.syscall_number == 101 and d.syscall_arg0 == 0:
+                d.syscall_return = 0
         
         flag_regs_after = {"OF": of(), "SF": sf(), "ZF": zf(), "CF": cf(), "PF": pf(), "AF": af()}
         for b,a in zip(flag_regs_before, flag_regs_after):
@@ -414,10 +404,11 @@ def trace_file(filepath:str, args: list, startaddr:int, maxlen:int, output:str, 
     f.close()
     d.kill()
 
-def trace_pid(pid:int, filepath, startaddr:int, maxlen:int, output:str, inputdata:list):
+def trace_pid(pid:int, filepath, startaddr:int, maxlen:int, output:str, inputdata:list,pass_ptrace:bool):
     """
     通过attach启动追踪
     """
+    # 计时器用于判断是否找到pid
     attach_timer = threading.Timer(TIMEOUT, exit_program_pid_attach)
     attach_timer.daemon = True
     attach_timer.start()
@@ -434,16 +425,9 @@ def trace_pid(pid:int, filepath, startaddr:int, maxlen:int, output:str, inputdat
 
     attach_timer.cancel()
 
-    global count
-    count = 0
-    # read系统调用的回调函数，处理程序标准输入
-    def handle_read(inputdata):
-        global count
-        p.sendline(inputdata[count].encode())
-        count += 1
-
-    # hook read的系统调用
-    if len(inputdata) > 0: d.handle_syscall("read",on_enter=handle_read(inputdata))
+    #输入程序需要输入的数据
+    for i in range(len(inputdata)): 
+        p.sendline(inputdata[i].encode())
     
     # 获取寄存器的值
     rip  = lambda: d.regs.rip
@@ -504,7 +488,7 @@ def trace_pid(pid:int, filepath, startaddr:int, maxlen:int, output:str, inputdat
         # 获取左右两边的操作数
         registers = [reg.strip() for reg in op_str.split(',')]
         # 处理标准库函数
-        lib_func_handler=handle_lib_func(d,rip_addr,f,lib_info,binary_info)
+        lib_func_handler=handle_lib_func(d,rip_addr,f,lib_info,binary_info,pass_ptrace)
         if lib_func_handler: continue
 
         # 右侧打印寄存器和内存
@@ -610,6 +594,10 @@ def parse_args():
     parser.add_argument('-i', '--input', nargs='*',
                         help='可选参数，程序使用标准输入流需要输入的数据，多个数据用空格分隔,例如: data1 data2 data3')
     
+    # 可选参数，是否启动绕过反调试功能
+    parser.add_argument('-pa','--pass-antidebug', type=int, choices=[0, 1], default=0,
+                        help='可选参数，是否启动绕过反调试功能，0表示不绕过，1表示绕过，默认不绕过')
+    
     # 可选参数，添加程序的启动参数，只有再选择通过文件启动才有效
     parser.add_argument('-a', '--args', nargs=argparse.REMAINDER,
                     help='可选参数，添加程序的启动参数，只有再选择通过文件启动才有效，多个参数用空格分隔(只能放在最后一个参数)')
@@ -621,22 +609,26 @@ def main():
     args = parse_args()
     env = (dict(item.split("=", 1) for item in args.env)) if args.env else {}
     inputs = args.input or []
-
+    if args.pass_antidebug == 1:
+        pass_ptrace = True
+    else:
+        pass_ptrace = False
+    print("如果程序在输出文件中长时间没有输出，请检查是否需要输入数据，起始位置是否正确，或者程序是否已经退出。必要时用Ctrl+C终止程序,并在控制台中杀掉残余进程。")
     if not args.pid:
-        print(f"文件: {args.file} 参数: {args.args} 开始地址: {args.start} 最大trace数量: {args.max_trace} 输出文件: {args.output} 环境变量： {env} 输入流: {inputs}")
+        print(f"文件: {args.file} 参数: {args.args} 开始地址: {args.start} 最大trace数量: {args.max_trace} 输出文件: {args.output} 环境变量： {env} 输入流: {inputs} 反调试: {"绕过" if pass_ptrace else "不绕过"}")
         t = threading.Thread(target=timer_thread, daemon=True)
         t.start()
         try:
-            trace_file(args.file,args.args,args.start,args.max_trace,args.output,env,inputs)
+            trace_file(args.file,args.args,args.start,args.max_trace,args.output,env,inputs,pass_ptrace)
         except Exception as e:
             print("出现未知错误",e)
 
     else:
         t = threading.Thread(target=timer_thread, daemon=True)
         t.start()
-        print(f"文件: {args.filepath}  开始地址: {args.start} 最大trace数量: {args.max_trace} 输出文件: {args.output} 输入流: {inputs}")
+        print(f"文件: {args.filepath}  开始地址: {args.start} 最大trace数量: {args.max_trace} 输出文件: {args.output} 输入流: {inputs} 反调试: {"绕过" if pass_ptrace else "不绕过"}")
         try:
-            trace_pid(args.pid, args.filepath, args.start, args.max_trace, args.output, inputs)
+            trace_pid(args.pid, args.filepath, args.start, args.max_trace, args.output, inputs,pass_ptrace)
         except PermissionError as e:
             print("没有附加权限，程序通过ptrace进行追踪，请检查你的 ptrace_scope 文件，是否允许非父进程附加\n",e)
         except Exception as e:
