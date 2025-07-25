@@ -67,6 +67,7 @@ options:
 
 r3ctf2025中的got表混淆
 ![](./png/Snipaste_2025-07-23_22-08-02.png)
+
 ptrace反调试绕过
 ![](./png/Snipaste_2025-07-24_20-39-31.png)
 
