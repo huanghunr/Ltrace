@@ -83,7 +83,7 @@ def dump_registers_to_file(d, f):
         line = ""
         for reg in general_regs[i:i+3]:
             val = getattr(regs, reg)
-            line += f"{reg:<8} 0x{val:016x}    "
+            line += f"{reg:<8} 0x{val:08x}    "
         f.write(line.rstrip() + "\n")
 
     f.write(format_rflags_string(regs.eflags) + "\n")
@@ -332,7 +332,7 @@ def trace_file_x32(filepath:str, args: list, startaddr:int, maxlen:int, output:s
         # 直接打印左侧操作数的寄存器
         if reg_name in x32_regs:
             d.step()
-            reg_str = ''.join(f"{reg_name:<3}={getattr(d.regs,reg_name):#018x}")
+            reg_str = ''.join(f"{reg_name:<3}={getattr(d.regs,reg_name):#010x}")
 
         # 处理指针，内存访问
         elif "["in reg_name and mnemonic != "nop":
@@ -352,7 +352,7 @@ def trace_file_x32(filepath:str, args: list, startaddr:int, maxlen:int, output:s
                     d.step()
                     try:
                         mem_data_qword = int.from_bytes(d.memory[(mem_addr&0xffffffff),4], "little")
-                        reg_str = f"mem={mem_data_qword:#018x}"
+                        reg_str = f"mem={mem_data_qword:#010x}"
                     except Exception as e:
                         reg_str = f"mem=[get error]"
                 else:
@@ -360,7 +360,7 @@ def trace_file_x32(filepath:str, args: list, startaddr:int, maxlen:int, output:s
                     d.step()
                     try:
                         mem_data_qword = int.from_bytes(d.memory[(mem_addr&0xffffffff),4], "little")
-                        reg_str = f"mem={mem_data_qword:#018x}"
+                        reg_str = f"mem={mem_data_qword:#010x}"
                     except Exception as e:
                         # print(f"Error reading memory at {hex(mem_addr)}: {e},eip={hex(eip())}")
                         # print(f"[{base} + {index}*{scale} + {hex(disp)}]")
@@ -376,7 +376,7 @@ def trace_file_x32(filepath:str, args: list, startaddr:int, maxlen:int, output:s
 
         # 遇到call时打印参数寄存器
         if mnemonic == "call":
-            reg_str = " ".join(f"{r:<3}={getattr(d.regs,r):#018x}" for r in args_regs)
+            reg_str = " ".join(f"{r:<3}={getattr(d.regs,r):#010x}" for r in args_regs)
 
         elif "j" in mnemonic and not "jmp" in mnemonic:
             # 根据不同的跳转指令添加对应的标志位
@@ -506,7 +506,7 @@ def trace_pid_x32(pid:int, filepath, startaddr:int, maxlen:int, output:str, inpu
         # 直接打印左侧操作数的寄存器
         if reg_name in x32_regs:
             d.step()
-            reg_str = ''.join(f"{reg_name:<3}={getattr(d.regs,reg_name):#018x}")
+            reg_str = ''.join(f"{reg_name:<3}={getattr(d.regs,reg_name):#010x}")
 
         # 处理指针，内存访问
         elif "["in reg_name and mnemonic != "nop":
@@ -520,12 +520,12 @@ def trace_pid_x32(pid:int, filepath, startaddr:int, maxlen:int, output:str, inpu
                 disp = op.mem.disp
                 if not seg is None:
                     d.step()
-                elif index is None or index == "riz":
+                elif index is None:
                     mem_addr = getattr(d.regs, base) + disp
                     d.step()
                     try:
                         mem_data_qword = int.from_bytes(d.memory[(mem_addr&0xffffffff),4], "little")
-                        reg_str = f"mem={mem_data_qword:#018x}"
+                        reg_str = f"mem={mem_data_qword:#010x}"
                     except Exception as e:
                         reg_str = f"mem=[get error]"
                 else:
@@ -533,7 +533,7 @@ def trace_pid_x32(pid:int, filepath, startaddr:int, maxlen:int, output:str, inpu
                     d.step()
                     try:
                         mem_data_qword = int.from_bytes(d.memory[(mem_addr&0xffffffff),4], "little")
-                        reg_str = f"mem={mem_data_qword:#018x}"
+                        reg_str = f"mem={mem_data_qword:#010x}"
                     except Exception as e:
                         reg_str = f"mem=[get error]"
             else:
@@ -543,7 +543,7 @@ def trace_pid_x32(pid:int, filepath, startaddr:int, maxlen:int, output:str, inpu
 
         # 遇到call时打印参数寄存器
         if mnemonic == "call":
-            reg_str = " ".join(f"{r:<3}={getattr(d.regs,r):#018x}" for r in args_regs)
+            reg_str = " ".join(f"{r:<3}={getattr(d.regs,r):#010x}" for r in args_regs)
 
         elif "j" in mnemonic and not "jmp" in mnemonic:
             # 根据不同的跳转指令添加对应的标志位
