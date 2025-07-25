@@ -5,7 +5,6 @@ import threading
 from capstone import *
 from capstone.x86 import *
 from pwn import ELF,context
-import argparse
 from elftools.elf.elffile import ELFFile
 
 context.log_level ="error"
@@ -23,7 +22,7 @@ def exit_program(d):
     """
     当计时器超时时执行的函数，用于退出程序。
     """
-    print(f"error 开始地址不正确，程序可能运行不到这个开始地址，请重新设置")
+    print(f"开始地址不正确，程序可能运行不到这个开始地址，请重新设置")
     os.kill(d.pid,signal.SIGKILL)
     os._exit(1)
     
@@ -142,7 +141,7 @@ def get_libs_info(d,binary_file_name):
         d.print_maps()
         d.kill()
         print(e)
-        print("error: 无法读取标准库，请在结束所有与追踪程序相关进程后再继续")
+        print("无法读取标准库，请在结束所有与追踪程序相关进程后再继续")
         exit(0)
 
 def get_binary_info(d, binary_file_name):

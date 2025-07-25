@@ -5,41 +5,43 @@ import threading
 from capstone import *
 from capstone.x86 import *
 from pwn import ELF,context
-import argparse
 from elftools.elf.elffile import ELFFile
 
 context.log_level ="error"
 TIMEOUT = 10
 
 def timer_thread():
+    """
+    A thread that displays an elapsed time counter.
+    """
     start = time.perf_counter()
     while True:
         elapsed = time.perf_counter() - start
-        sys.stdout.write(f"\rTime: {elapsed:.2f} 秒> ")
+        sys.stdout.write(f"\rTime: {elapsed:.2f} seconds> ")
         sys.stdout.flush()
         time.sleep(0.1)
 
 def exit_program(d):
     """
-    当计时器超时时执行的函数，用于退出程序。
+    Function executed when the timer times out, used to exit the program.
     """
-    print(f"error 开始地址不正确，程序可能运行不到这个开始地址，请重新设置")
+    print(f"Error: The starting address is incorrect. The program may not reach this address. Please set it again.")
     os.kill(d.pid,signal.SIGKILL)
     
 
 def exit_program_pid_attach():
     """
-    当计时器超时时执行的函数，用于退出程序。
+    Function executed when the timer times out while attaching, used to exit the program.
     """
-    print(f"没有找到pid，请检查pid是否正确，或者程序是否已经退出")
+    print(f"PID not found. Please check if the PID is correct or if the program has already exited.")
     os._exit(1)
 
+# Argument registers for function calls in x86-64
 args_regs = [
-    "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
-    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
-    "rip",
+    "rdi", "rsi", "rdx", "rcx", "r8", "r9"
 ]
 
+# A comprehensive list of x86-64 registers
 x64_regs = [
     "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
@@ -58,9 +60,9 @@ x64_regs = [
 
 def format_rflags_string(rflags_value):
     """
-    解析 RFLAGS 寄存器值，并以字符串形式返回关键标志位的状态。
+    Parses the RFLAGS register value and returns the status of key flags as a string.
     """
-    # 提取各个标志位
+    # Extract individual flag bits
     zf = (rflags_value >> 6) & 1
     sf = (rflags_value >> 7) & 1
     cf = (rflags_value >> 0) & 1
@@ -68,14 +70,14 @@ def format_rflags_string(rflags_value):
     pf = (rflags_value >> 2) & 1
     af = (rflags_value >> 4) & 1
 
-    # 格式化为字符串
-    flags_str = f"ZF={hex(zf)} SF={hex(sf)} CF={hex(cf)} OF={hex(of) } PF={hex(pf)} AF={hex(af)}"
+    # Format as a string
+    flags_str = f"ZF={hex(zf)} SF={hex(sf)} CF={hex(cf)} OF={hex(of)} PF={hex(pf)} AF={hex(af)}"
     
     return flags_str
 
 def dump_registers_to_file(d, f):
     """
-    打印寄存器的初始值
+    Dumps the initial values of the registers to a file.
     """
     regs = d.regs
     general_regs = [
@@ -86,7 +88,7 @@ def dump_registers_to_file(d, f):
         'fs_base', 'gs_base'
     ]
 
-    # 通用寄存器
+    # General-purpose registers
     for i in range(0, len(general_regs), 3):
         line = ""
         for reg in general_regs[i:i+3]:
@@ -96,14 +98,15 @@ def dump_registers_to_file(d, f):
 
     f.write(format_rflags_string(regs.eflags) + "\n")
 
-    # MMX/ST 
+    # MMX/ST registers
     for i in range(8):
         mm = getattr(regs, f"mm{i}")
         st = getattr(regs, f"st{i}")
         f.write(f"mm{i}=0x{mm:x}    ")
         f.write(f"st{i}={st}    ")
+    f.write("\n")
 
-    # XMM/YMM 
+    # XMM/YMM registers
     for i in range(16):
         xmm = getattr(regs, f"xmm{i}")
         ymm = getattr(regs, f"ymm{i}")
@@ -113,34 +116,35 @@ def dump_registers_to_file(d, f):
 
 def get_binary_name(filepath):
     """
-    获取程序的名称
+    Gets the name of the program from its file path.
     """
     path = filepath.split("/")
     return path[-1]
 
-def get_libs_info(d,binary_file_name):
+def get_libs_info(d, binary_file_name):
     """
-    获取程序以及标准库的数据，包括名称、路径、起止地址、导出符号
+    Gets information about the program's loaded libraries, including name, path, start/end addresses, and exported symbols.
     """
     try:
         libs_info = {}
         maps = d.maps
         for m in maps:
             path = m.backing_file
-            # 跳过匿名映射
+            # Skip anonymous mappings
             if not path or not path.startswith("/"):
                 continue
-            # 跳过程序本身
+            # Skip the program itself
             if binary_file_name in path:
                 continue
-            # 处理标准库
+            # Handle standard libraries
             if path not in libs_info:
                 lib_name = path.split("/")[-1]
                 libs_info[path] = {"name": lib_name, "base": m.start, "end": m.end, "symbol":{}}
             else:
                 libs_info[path]["base"] = min(libs_info[path]["base"], m.start)
                 libs_info[path]["end"] = max(libs_info[path]["end"], m.end)
-        # 获取标准库的导出符号
+        
+        # Get exported symbols for each standard library
         for i in libs_info:
             lib = ELF(i)
             libs_info[i]["symbol"] = {libs_info[i]["base"] + addr: name for name, addr in lib.symbols.items()}
@@ -150,22 +154,22 @@ def get_libs_info(d,binary_file_name):
         d.print_maps()
         d.kill()
         print(e)
-        print("error: 无法读取标准库，请在结束所有与追踪程序相关进程后再继续")
+        print("Error: Could not read standard libraries. Please terminate all processes related to the traced program before continuing.")
         exit(0)
 
 def get_binary_info(d, binary_file_name):
     """
-    获取程序以及标准库的数据，包括名称、路径、起止地址、导出符号
+    Gets information about the program binary, including its name, path, and start/end addresses.
     """
     try:
-        binary_info ={}
+        binary_info = {}
         maps = d.maps
         for m in maps:
             path = m.backing_file
             if not path or not path.startswith("/"):
                 continue
             if binary_file_name in path:
-                if len(binary_info) == 0:
+                if not binary_info:
                     binary_info = {"name": binary_file_name, "base": m.start, "end": m.end}
                 else:
                     binary_info["base"] = min(binary_info["base"], m.start)
@@ -176,71 +180,86 @@ def get_binary_info(d, binary_file_name):
         d.print_maps()
         d.kill()
         print(e)
-        print("error: 无法读取程序信息，请在结束所有与追踪程序相关进程后再继续")
+        print("Could not read program information. Please terminate all processes related to the traced program before continuing.")
         exit(0)
 
 def get_entrypoint(filepath):
     """
-    获取程序的入口点
+    Gets the program's entry point from the ELF header.
     """
     try:
         with open(filepath, "rb") as f:
             elf = ELFFile(f)
         return elf.header.e_entry
     except Exception as e:
-        print("error:无法获取程序的入口点，elf 文件可能已经损坏，请手动指定开始地址或者使用 pid 进行附加")
+        print("Could not get the program's entry point. The ELF file might be corrupt. Please specify the start address manually or attach using a PID.")
         print(e)
         exit(0)
 
-def handle_lib_func(d,ripaddr, f, lib_info, binary_info, pass_ptrace):
+def handle_lib_func(d, rip_addr, f, lib_info, binary_info, pass_ptrace):
     """
-    处理标准库函数
+    Handles execution flow when inside a standard library function.
+    It steps through the library code until execution returns to the main binary.
     """
     for lib_path in lib_info:
         libc_base = lib_info[lib_path]["base"]
         libc_end = lib_info[lib_path]["end"]
-        if ripaddr >= libc_base and ripaddr <= libc_end:
-            if ripaddr in lib_info[lib_path]["symbol"]:
-                func_name = lib_info[lib_path]["symbol"][ripaddr]
+        if libc_base <= rip_addr <= libc_end:
+            if rip_addr in lib_info[lib_path]["symbol"]:
+                func_name = lib_info[lib_path]["symbol"][rip_addr]
             else:
-                func_name = f"unknown_lib_function({lib_info[lib_path]["name"]})"
-            f.write(f"{hex(ripaddr)}\t\'{lib_info[lib_path]["name"]}\'!{hex(ripaddr-libc_base)}\t{func_name:<6}\n")
+                func_name = f"sub_{rip_addr-libc_base:x}"
+            
+            f.write(f"{hex(rip_addr)}\t'{lib_info[lib_path]['name']}'!{func_name:<6}\n")
+            
             try:
-                while(1):
+                while True:
                     if d.dead or d.zombie:
-                        print(f"追踪程序已退出。退出代码：{d.exit_code}; 退出信号：{d.exit_signal}")
+                        print(f"Traced program has exited. Exit code: {d.exit_code}; Exit signal: {d.exit_signal}")
                         f.close()
                         exit(0)
-                    # 处理ptrace反调试
+                    
+                    # Handle ptrace anti-debugging
                     if pass_ptrace and d.syscall_number == 101 and d.syscall_arg0 == 0:
                         d.syscall_return = 0
+                    
                     d.step()
                     rip = d.regs.rip
-                    if "ld-linux-x86-64.so.2" in lib_path:
-                        if rip < lib_info[lib_path]["base"] or rip > lib_info[lib_path]["end"]:
-                            return 1
-                    if rip >= binary_info["base"] and rip <= binary_info["end"]:
+                    
+                    # If execution returns to the main binary, stop stepping through the library.
+                    if binary_info["base"] <= rip <= binary_info["end"]:
                         return 1
+                    
+                    # If execution jumps to another library, let the main loop handle it.
+                    in_any_lib = False
+                    for other_lib_path in lib_info:
+                        if lib_info[other_lib_path]["base"] <= rip <= lib_info[other_lib_path]["end"]:
+                            in_any_lib = True
+                            break
+                    if not in_any_lib:
+                         return 1
+
             except RuntimeError as e:
-                    print(f"追踪程序意外结束。退出代码：{d.exit_code}; 退出信号：{d.exit_signal}",e)
-                    f.close()
-                    exit(0)
+                print(f"Traced program terminated unexpectedly. Exit code: {d.exit_code}; Exit signal: {d.exit_signal}", e)
+                f.close()
+                exit(0)
     return 0
+
 
 def trace_file_x64(filepath:str, args: list, startaddr:int, maxlen:int, output:str, env:dict, inputdata:list, pass_ptrace:bool):
     """
-    通过二进制文件启动追踪
+    Starts tracing by launching a binary file.
     """
-    # 计时器
+    # Start the timer thread
     t = threading.Thread(target=timer_thread, daemon=True)
     t.start()
     
     md = Cs(CS_ARCH_X86, CS_MODE_64)
     md.detail = True
-    # 取程序名称
+    # Get program name
     binary_file_name = get_binary_name(filepath)
 
-    # 判断追踪程序是否需要输入参数
+    # Check if the traced program requires arguments
     if args: 
         d = debugger(argv= [filepath] + args,
                      auto_interrupt_on_command=True,continue_to_binary_entrypoint=False,escape_antidebug=True,env=env)
@@ -250,12 +269,11 @@ def trace_file_x64(filepath:str, args: list, startaddr:int, maxlen:int, output:s
     p = d.run()
     pid = d.pid
 
-    # 发送程序需要输入的数据
+    # Send input data to the program
     for i in range(len(inputdata)): 
         p.sendline(inputdata[i].encode())
-    # pass_ptrace(d)
 
-    # 获取寄存器的值
+    # Lambda functions to get register values
     rip  = lambda: d.regs.rip
     zf = lambda: (d.regs.eflags & 0x40) >> 6
     sf = lambda: (d.regs.eflags & 0x80) >> 7
@@ -264,16 +282,16 @@ def trace_file_x64(filepath:str, args: list, startaddr:int, maxlen:int, output:s
     of = lambda: (d.regs.eflags & 0x800) >> 11
     af = lambda: (d.regs.eflags & 0x10) >> 4
     
-    # 获取二进制文件的信息，包括起止地址
-    binary_info = get_binary_info(d,binary_file_name)
+    # Get information about the binary file, including start and end addresses
+    binary_info = get_binary_info(d, binary_file_name)
 
-    # 计数器用于检查初始位置是否合法
-    timer = threading.Timer(TIMEOUT, exit_program,args=(d))
+    # A timer to check if the initial position is valid
+    timer = threading.Timer(TIMEOUT, exit_program, args=(d,))
     timer.daemon = True
     timer.start()
     f = open(output, "w")
 
-    # 运行到指定的开始地址，没有指定默认从入口点开始
+    # Run to the specified start address, or the entry point by default if not specified
     base_addr = binary_info["base"]
     if startaddr != 0:
         bp1 = d.breakpoint(startaddr, hardware=True, file = binary_file_name)
@@ -293,51 +311,53 @@ def trace_file_x64(filepath:str, args: list, startaddr:int, maxlen:int, output:s
                 d.breakpoints[base_addr+entrypoint].disable()
                 break
 
-    # 如果初始位置正确，取消计时器
+    # If the initial position is correct, cancel the timer
     timer.cancel()
 
-    # 获取程序以及标准库的数据，包括名称、路径、起止地址、导出符号(不能在太前面运行，用于确保所有库已经加载进去)
-    lib_info = get_libs_info(d,binary_file_name)
+    # Get data for the program and standard libraries (must be run after libraries are loaded)
+    lib_info = get_libs_info(d, binary_file_name)
     dump_registers_to_file(d, f)
     
-    binary_nick_name = f"\'{binary_file_name}\'" if len(binary_file_name) < 12 else f"\'{binary_file_name[0:10:] + ".."}\'"
+    binary_nick_name = f"'{binary_file_name}'" if len(binary_file_name) < 12 else f"'{binary_file_name[0:10]}..'"
     for i in range(maxlen):
-        # 检查最终是否已到最大值
+        # Check if the traced program has exited
         if d.dead or d.zombie:
-            print(f"追踪程序已退出。退出代码：{d.exit_code}; 退出信号：{d.exit_signal}")
+            print(f"Traced program has exited. Exit code: {d.exit_code}; Exit signal: {d.exit_signal}")
             f.close()
             exit(0)
 
         rip_addr = rip()
         try:
-            # 读取当前指令
-            CODE = d.memory[rip_addr,16]
+            # Read the current instruction
+            CODE = d.memory[rip_addr, 16]
         except RuntimeError as e:
-                print(f"追踪程序意外结束。退出代码：{d.exit_code}; 退出信号：{d.exit_signal}",e)
-                f.close()
-                exit(0)
-        # 解析当前指令
+            print(f"Traced program terminated unexpectedly. Exit code: {d.exit_code}; Exit signal: {d.exit_signal}", e)
+            f.close()
+            exit(0)
+        
+        # Disassemble the current instruction
         address, size, mnemonic, op_str = next(md.disasm_lite(CODE, 0x1))
-        # 获取标志位，用于跟踪指令执行前后的变化
+        # Get the flag registers to track changes
         flag_regs_before = {"OF": of(), "SF": sf(), "ZF": zf(), "CF": cf(), "PF": pf(), "AF": af()}
-        # 获取左右两边的操作数
+        # Get the operands
         registers = [reg.strip() for reg in op_str.split(',')]
-        # 处理标准库函数
-        lib_func_handler=handle_lib_func(d,rip_addr,f,lib_info,binary_info,pass_ptrace)
-        if lib_func_handler: continue
+        
+        # Handle standard library function calls
+        if handle_lib_func(d, rip_addr, f, lib_info, binary_info, pass_ptrace):
+            continue
 
-        # 右侧打印寄存器和内存
+        # String to hold register and memory state for printing
         reg_str = ""
-        reg_name = registers[0]
-        # 直接打印左侧操作数的寄存器
+        reg_name = registers[0] if registers else ""
+        
+        # Directly print the destination operand register
         if reg_name in x64_regs:
             d.step()
             reg_str = ''.join(f"{reg_name:<3}={getattr(d.regs,reg_name):#018x}")
 
-        # 处理指针，内存访问
-        elif "["in reg_name and mnemonic != "nop":
-            # print(reg_name)
-            insn = next(md.disasm(CODE,1))
+        # Handle pointers and memory access
+        elif "[" in reg_name and mnemonic != "nop":
+            insn = next(md.disasm(CODE, 1))
             op = insn.operands[0]
             if op.type == X86_OP_MEM:
                 base = insn.reg_name(op.mem.base)
@@ -345,98 +365,96 @@ def trace_file_x64(filepath:str, args: list, startaddr:int, maxlen:int, output:s
                 seg = insn.reg_name(op.mem.segment)
                 scale = op.mem.scale
                 disp = op.mem.disp
-                if not seg is None:
+                if seg is not None:
                     d.step()
                 elif index is None or index == "riz":
                     mem_addr = getattr(d.regs, base) + disp
                     d.step()
                     try:
-                        mem_data_qword = int.from_bytes(d.memory[(mem_addr&0xffffffffffffffff),8], "little")
+                        mem_data_qword = int.from_bytes(d.memory[(mem_addr & 0xffffffffffffffff), 8], "little")
                         reg_str = f"mem={mem_data_qword:#018x}"
                     except Exception as e:
-                        reg_str = f"mem=[get error]"
+                        reg_str = f"mem=[error reading]"
                 else:
                     mem_addr = getattr(d.regs, base) + getattr(d.regs, index) * scale + disp
                     d.step()
                     try:
-                        mem_data_qword = int.from_bytes(d.memory[(mem_addr&0xffffffffffffffff),8], "little")
+                        mem_data_qword = int.from_bytes(d.memory[(mem_addr & 0xffffffffffffffff), 8], "little")
                         reg_str = f"mem={mem_data_qword:#018x}"
                     except Exception as e:
-                        # print(f"Error reading memory at {hex(mem_addr)}: {e},rip={hex(rip())}")
-                        # print(f"[{base} + {index}*{scale} + {hex(disp)}]")
-                        # d.pprint_regs()
-                        # d.print_maps()
-                        # exit(1)
-                        reg_str = f"mem=[get error]"
-                        # d.step()
+                        reg_str = f"mem=[error reading]"
             else:
                 d.step()
         else:
             d.step()
 
-        # 遇到call时打印参数寄存器
+        # When a 'call' is encountered, print argument registers
         if mnemonic == "call":
             reg_str = " ".join(f"{r:<3}={getattr(d.regs,r):#018x}" for r in args_regs)
 
-        elif "j" in mnemonic and not "jmp" in mnemonic:
-            # 根据不同的跳转指令添加对应的标志位
-            if mnemonic == "js" or mnemonic == "jns":
+        elif "j" in mnemonic and "jmp" not in mnemonic:
+            # Add corresponding flags for different jump instructions
+            if mnemonic in ["js", "jns"]:
                 reg_str += f" SF={sf()}"
-            elif mnemonic == "jo" or mnemonic == "jno":
+            elif mnemonic in ["jo", "jno"]:
                 reg_str += f" OF={of()}"
-            elif mnemonic == "jz" or mnemonic == "jnz":
+            elif mnemonic in ["jz", "jnz", "je", "jne"]:
                 reg_str += f" ZF={zf()}"
-            elif mnemonic == "jp" or mnemonic == "jnp":
+            elif mnemonic in ["jp", "jnp"]:
                 reg_str += f" PF={pf()}"
-            elif mnemonic == "jc" or mnemonic == "jnc":
-                reg_str += f" CF={cf()}" 
-        # 处理ptrace反调试
+            elif mnemonic in ["jc", "jnc", "jb", "jnb", "jae", "jnae"]:
+                reg_str += f" CF={cf()}"
+        
+        # Handle ptrace anti-debugging
         elif mnemonic == "syscall":
             if pass_ptrace and d.syscall_number == 101 and d.syscall_arg0 == 0:
                 d.syscall_return = 0
-        # 获取指令执行前后的标志位
+                
+        # Get the flags after the instruction execution and note changes
         flag_regs_after = {"OF": of(), "SF": sf(), "ZF": zf(), "CF": cf(), "PF": pf(), "AF": af()}
-        for b,a in zip(flag_regs_before, flag_regs_after):
+        for b, a in zip(flag_regs_before, flag_regs_after):
             if flag_regs_before[b] != flag_regs_after[a]:
                 reg_str += f" {b}={hex(flag_regs_after[a])}"
-        # 检查指令所在的位置，打印指令信息
-        if rip_addr >= binary_info["base"] and rip_addr <= binary_info["end"]:
+                
+        # Check the instruction's location and print instruction information
+        if binary_info["base"] <= rip_addr <= binary_info["end"]:
             f.write(f"{hex(rip_addr)}\t{binary_nick_name}!{hex(rip_addr-base_addr)}\t{mnemonic:<6}\t{op_str:<30}\t{reg_str}\n")
         else:
-            f.write(f"{hex(rip_addr)}\t!unkonwn_file\t{mnemonic:<6}\t{op_str:<30}\t{reg_str}\n")
+            f.write(f"{hex(rip_addr)}\t!unknown_file\t{mnemonic:<6}\t{op_str:<30}\t{reg_str}\n")
+            
     f.close()
     d.kill()
 
-def trace_pid_x64(pid:int, filepath, startaddr:int, maxlen:int, output:str, inputdata:list,pass_ptrace:bool):
+def trace_pid_x64(pid:int, filepath:str, startaddr:int, maxlen:int, output:str, inputdata:list, pass_ptrace:bool):
     """
-    通过attach启动追踪
+    Starts tracing by attaching to a running process.
     """
-    # 计时器
+    # Start the timer thread
     t = threading.Thread(target=timer_thread, daemon=True)
     t.start()
 
-    # 计时器用于判断是否找到pid
+    # Timer to check if the PID is found
     attach_timer = threading.Timer(TIMEOUT, exit_program_pid_attach)
     attach_timer.daemon = True
     attach_timer.start()
 
     md = Cs(CS_ARCH_X86, CS_MODE_64)
     md.detail = True
-    # 取程序名称
+    # Get program name
     binary_file_name = get_binary_name(filepath)
 
-    # 初始化信息
+    # Initialize debugger and attach to the process
     d = debugger(filepath,
-                auto_interrupt_on_command=True, continue_to_binary_entrypoint=False,escape_antidebug=True)
+                 auto_interrupt_on_command=True, continue_to_binary_entrypoint=False,escape_antidebug=True)
     p = d.attach(pid)
 
     attach_timer.cancel()
 
-    #输入程序需要输入的数据
+    # Send input data to the program
     for i in range(len(inputdata)): 
         p.sendline(inputdata[i].encode())
     
-    # 获取寄存器的值
+    # Lambda functions to get register values
     rip  = lambda: d.regs.rip
     zf = lambda: (d.regs.eflags & 0x40) >> 6
     sf = lambda: (d.regs.eflags & 0x80) >> 7
@@ -445,18 +463,18 @@ def trace_pid_x64(pid:int, filepath, startaddr:int, maxlen:int, output:str, inpu
     of = lambda: (d.regs.eflags & 0x800) >> 11
     af = lambda: (d.regs.eflags & 0x10) >> 4
     
-    # 获取二进制文件的信息，包括起止地址
-    binary_info = get_binary_info(d,binary_file_name)
+    # Get information about the binary file, including start and end addresses
+    binary_info = get_binary_info(d, binary_file_name)
 
-    # 计数器用于检查初始位置是否合法
-    timer = threading.Timer(TIMEOUT, exit_program,args=(d))
+    # A timer to check if the initial position is valid
+    timer = threading.Timer(TIMEOUT, exit_program, args=(d,))
     timer.daemon = True
     timer.start()
     f = open(output, "w")
 
-    # 运行到指定的开始地址，没有指定默认从入口点开始
-    base_addr = binary_info["base"]
+    # If a start address is specified, set a breakpoint and continue until it's hit
     if startaddr != 0:
+        base_addr = binary_info["base"]
         bp1 = d.breakpoint(startaddr, hardware=True, file = binary_file_name)
         while 1:
             d.cont()
@@ -465,52 +483,55 @@ def trace_pid_x64(pid:int, filepath, startaddr:int, maxlen:int, output:str, inpu
                 d.breakpoints[base_addr+startaddr].disable()
                 break
 
-    # 如果初始位置正确，取消计时器
+    # If the initial position is correct, cancel the timer
     timer.cancel()
 
-    # 获取程序以及标准库的数据，包括名称、路径、起止地址、导出符号(不能在太前面运行，用于确保所有库已经加载进去)
-    lib_info = get_libs_info(d,binary_file_name)
+    # Get data for the program and standard libraries (must be run after libraries are loaded)
+    lib_info = get_libs_info(d, binary_file_name)
 
-    # 打印寄存器的初始值
+    # Dump the initial values of the registers to a file
     dump_registers_to_file(d, f)
     
-    binary_nick_name = f"\'{binary_file_name}\'" if len(binary_file_name) < 12 else f"\'{binary_file_name[0:10:] + ".."}\'"
+    binary_nick_name = f"'{binary_file_name}'" if len(binary_file_name) < 12 else f"'{binary_file_name[0:10]}..'"
     for i in range(maxlen):
-        # 检查最终是否已到最大值
+        # Check if the traced program has exited
         if d.dead or d.zombie:
-            print(f"追踪程序已退出。退出代码：{d.exit_code}; 退出信号：{d.exit_signal}")
+            print(f"Traced program has exited. Exit code: {d.exit_code}; Exit signal: {d.exit_signal}")
             f.close()
             exit(0)
 
         rip_addr = rip()
         try:
-            # 读取当前指令
-            CODE = d.memory[rip_addr,16]
+            # Read the current instruction
+            CODE = d.memory[rip_addr, 16]
         except RuntimeError as e:
-                print(f"追踪程序意外结束。退出代码：{d.exit_code}; 退出信号：{d.exit_signal}",e)
-                f.close()
-                exit(0)
-        # 解析当前指令
+            print(f"Traced program terminated unexpectedly. Exit code: {d.exit_code}; Exit signal: {d.exit_signal}", e)
+            f.close()
+            exit(0)
+            
+        # Disassemble the current instruction
         address, size, mnemonic, op_str = next(md.disasm_lite(CODE, 0x1))
-        # 获取标志位，用于跟踪指令执行前后的变化
+        # Get the flag registers to track changes
         flag_regs_before = {"OF": of(), "SF": sf(), "ZF": zf(), "CF": cf(), "PF": pf(), "AF": af()}
-        # 获取左右两边的操作数
+        # Get the operands
         registers = [reg.strip() for reg in op_str.split(',')]
-        # 处理标准库函数
-        lib_func_handler=handle_lib_func(d,rip_addr,f,lib_info,binary_info,pass_ptrace)
-        if lib_func_handler: continue
+        
+        # Handle standard library function calls
+        if handle_lib_func(d, rip_addr, f, lib_info, binary_info, pass_ptrace):
+            continue
 
-        # 右侧打印寄存器和内存
+        # String to hold register and memory state for printing
         reg_str = ""
-        reg_name = registers[0]
-        # 直接打印左侧操作数的寄存器
+        reg_name = registers[0] if registers else ""
+        
+        # Directly print the destination operand register
         if reg_name in x64_regs:
             d.step()
             reg_str = ''.join(f"{reg_name:<3}={getattr(d.regs,reg_name):#018x}")
 
-        # 处理指针，内存访问
-        elif "["in reg_name and mnemonic != "nop":
-            insn = next(md.disasm(CODE,1))
+        # Handle pointers and memory access
+        elif "[" in reg_name and mnemonic != "nop":
+            insn = next(md.disasm(CODE, 1))
             op = insn.operands[0]
             if op.type == X86_OP_MEM:
                 base = insn.reg_name(op.mem.base)
@@ -518,59 +539,63 @@ def trace_pid_x64(pid:int, filepath, startaddr:int, maxlen:int, output:str, inpu
                 seg = insn.reg_name(op.mem.segment)
                 scale = op.mem.scale
                 disp = op.mem.disp
-                if not seg is None:
+                if seg is not None:
                     d.step()
                 elif index is None or index == "riz":
                     mem_addr = getattr(d.regs, base) + disp
                     d.step()
                     try:
-                        mem_data_qword = int.from_bytes(d.memory[(mem_addr&0xffffffffffffffff),8], "little")
+                        mem_data_qword = int.from_bytes(d.memory[(mem_addr & 0xffffffffffffffff), 8], "little")
                         reg_str = f"mem={mem_data_qword:#018x}"
                     except Exception as e:
-                        reg_str = f"mem=[get error]"
+                        reg_str = f"mem=[error reading]"
                 else:
                     mem_addr = getattr(d.regs, base) + getattr(d.regs, index) * scale + disp
                     d.step()
                     try:
-                        mem_data_qword = int.from_bytes(d.memory[(mem_addr&0xffffffffffffffff),8], "little")
+                        mem_data_qword = int.from_bytes(d.memory[(mem_addr & 0xffffffffffffffff), 8], "little")
                         reg_str = f"mem={mem_data_qword:#018x}"
                     except Exception as e:
-                        reg_str = f"mem=[get error]"
+                        reg_str = f"mem=[error reading]"
             else:
                 d.step()
         else:
             d.step()
 
-        # 遇到call时打印参数寄存器
+        # When a 'call' is encountered, print argument registers
         if mnemonic == "call":
             reg_str = " ".join(f"{r:<3}={getattr(d.regs,r):#018x}" for r in args_regs)
 
-        elif "j" in mnemonic and not "jmp" in mnemonic:
-            # 根据不同的跳转指令添加对应的标志位
-            if mnemonic == "js" or mnemonic == "jns":
+        elif "j" in mnemonic and "jmp" not in mnemonic:
+            # Add corresponding flags for different jump instructions
+            if mnemonic in ["js", "jns"]:
                 reg_str += f" SF={sf()}"
-            elif mnemonic == "jo" or mnemonic == "jno":
+            elif mnemonic in ["jo", "jno"]:
                 reg_str += f" OF={of()}"
-            elif mnemonic == "jz" or mnemonic == "jnz":
+            elif mnemonic in ["jz", "jnz", "je", "jne"]:
                 reg_str += f" ZF={zf()}"
-            elif mnemonic == "jp" or mnemonic == "jnp":
+            elif mnemonic in ["jp", "jnp"]:
                 reg_str += f" PF={pf()}"
-            elif mnemonic == "jc" or mnemonic == "jnc":
-                reg_str += f" CF={cf()}" 
-        # 处理ptrace反调试
+            elif mnemonic in ["jc", "jnc", "jb", "jnb", "jae", "jnae"]:
+                reg_str += f" CF={cf()}"
+                
+        # Handle ptrace anti-debugging
         elif mnemonic == "syscall":
             if pass_ptrace and d.syscall_number == 101 and d.syscall_arg0 == 0:
                 d.syscall_return = 0
-        # 获取指令执行前后的标志位
+                
+        # Get the flags after the instruction execution and note changes
         flag_regs_after = {"OF": of(), "SF": sf(), "ZF": zf(), "CF": cf(), "PF": pf(), "AF": af()}
-        for b,a in zip(flag_regs_before, flag_regs_after):
+        for b, a in zip(flag_regs_before, flag_regs_after):
             if flag_regs_before[b] != flag_regs_after[a]:
                 reg_str += f" {b}={hex(flag_regs_after[a])}"
-        # 检查指令所在的位置，打印指令信息
-        if rip_addr >= binary_info["base"] and rip_addr <= binary_info["end"]:
+                
+        # Check the instruction's location and print instruction information
+        base_addr = binary_info["base"]
+        if binary_info["base"] <= rip_addr <= binary_info["end"]:
             f.write(f"{hex(rip_addr)}\t{binary_nick_name}!{hex(rip_addr-base_addr)}\t{mnemonic:<6}\t{op_str:<30}\t{reg_str}\n")
         else:
-            f.write(f"{hex(rip_addr)}\t!unkonwn_file\t{mnemonic:<6}\t{op_str:<30}\t{reg_str}\n")
+            f.write(f"{hex(rip_addr)}\t!unknown_file\t{mnemonic:<6}\t{op_str:<30}\t{reg_str}\n")
             
     f.close()
     d.kill()

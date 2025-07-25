@@ -1,95 +1,102 @@
 # Ltrace
-Ltrace 是一个在linux x86_x64下基于capstone和libdebug开发的指令trace工具。它拥有超快的速度，和一定的反混淆和反反调试能力。
 
-Ltrace支持通过文件直接启动或者pid附加进行，支持添加启动参数和环境变量，可以指定位置开始追踪，并且添加用于标准输入流的交互数据。
+[简体中文](README.zh-CN.md)
 
-目前项目还在努力完善中，如有问题欢迎在issue中提出。
+Ltrace is an instruction tracing tool for Linux x86/x64, built on the Capstone disassembly framework and the `libdebug` library. It boasts high-speed performance and includes capabilities for anti-obfuscation and anti-anti-debugging.
 
-### 特点
+Ltrace supports tracing by launching a file directly or by attaching to a running process ID (PID). It allows for specifying command-line arguments, environment variables, a custom starting address for the trace, and pre-configured data for standard input interaction.
 
-- 快速：Ltrace 使用libdebug进行程序流的追踪和内存访问， 通过capstone进行轻量级反汇编，拥有大约18秒追踪十万执行流的能力(可能因为系统性能有所不同)。
-- 标准库函数符号：通过对程序的依赖库解析和流程进行追踪，实时获取标准库符号，这使得执行程序可以简洁地显示标准库函数的符号，并且省略进入标准库的执行内容。在未来我们计划优化C++程序的标准符号解析。
-- 抗标准函数名称混淆：Ltrace 对链接器的流程进行了处理，可以直接输出通过plt和got第一次获取函数时，链接器获取的标准函数。这让Ltrace 拥有了对抗got表标准函数名混淆的能力，同时也因为Ltrace只解析真正执行的函数符号，而不是程序自带的函数符号。
-- 详细的寄存器：我们在追踪过程中详细地打印了寄存器地值，便于您观察数据地变化。
-- 显示内存中的值：通过libdebug实现了获取内存中的内容，而不仅仅是寄存器中的值，未来我们还计划添加内存查看和字符串识别功能。
-- 反反调试：Ltrace 提供了绕过ptrace的功能，这可以让Ltrace绕过基础的反调试，我们在未来也计划添加更多的反调试绕过功能。
-- 线程追踪： 计划在未来实现指定线程追踪，而不单单是主线程。
-- 高拓展：libdebug 是一款易于上手的自动调试工具，您可以基于源码进行修改，在程序运行中进行任何操作，打造特定的追踪程序，包括hook系统调用，自动化获取内存内容进行数据处理等强大功能。
-- 自动交互：Ltrace可以预设需要用于与程序进行交互用到的文字，在程序需要提供标准输入时自动提供您输入的内容，这意味着您不必要在处理完输入交互后再进行程序的追踪。
+The project is currently under active development. If you encounter any problems, please feel free to [open an issue](https://www.google.com/search?q=https://github.com/your-repo-link/issues).
 
-### 注意
-- 通过pid进行附加需在 ptrace_scope 中许可非父进程附加程序。
-- 程序可以自动识别x86和x64
-- 您可能会看到类似 "unknown_lib_function(ld-linux-x86-64.so.2)" 的内容，这是由于该函数并没有被标准库进行导出，这意味着他们很有可能是系统自动调用的函数，而不是人手动调用的。当然也可能是某一个导出函数的优化版本，建议结合二进制分析软件进行分析。
-- 如果您要使用 libdebug 的api修改Ltrace，libdebug 的系统停止事件在 step() 时似乎不可用，这意味着您可能会无法拦截系统调用，以及其他依赖停止事件的api。
-- 如果您在分析用c++编写的程序时发现符号识别类似 "_ZStlsISt11char_traitsIcEERSt13basic_ostreamIcT_ES5_PKc" 这是c++导出符号的名称修饰，我们在未来会尝试解决这个问题，您可以使用c++filt对名称字符串进行反编译。
+### Features
 
+- **Fast**: Ltrace uses `libdebug` for tracing program flow and memory access, and `capstone` for lightweight disassembly. It can trace approximately 100,000 instructions in about 18 seconds (performance may vary depending on system specifications).
+- **Standard Library Symbol Resolution**: By parsing the program's dependencies and tracing its execution flow, Ltrace resolves standard library symbols in real-time. This allows for a clean display of standard library function calls while skipping the trace of their internal execution. We plan to improve C++ symbol resolution in the future.
+- **Resistant to GOT Obfuscation**: Ltrace handles the linker's resolution process, allowing it to directly output the standard function names as they are resolved via the PLT and GOT for the first time. This makes Ltrace effective against Global Offset Table (GOT) obfuscation, as it resolves symbols based on actual execution rather than relying on the potentially misleading symbols embedded in the binary.
+- **Detailed Register View**: During the trace, register values are printed in detail, making it easy to observe data changes as the program executes.
+- **Memory Value Display**: Leveraging `libdebug`, Ltrace can display content directly from memory, not just register values. We plan to add full memory dumping and string recognition features in the future.
+- **Anti-Anti-Debugging**: Ltrace provides a built-in bypass for basic `ptrace`-based anti-debugging checks. We plan to add more advanced anti-debugging techniques in the future.
+- **Highly Extensible**: `libdebug` is an easy-to-use automated debugging tool. You can modify the Ltrace source code to build custom tracing programs, adding powerful features like hooking system calls or automating data extraction and processing from memory.
+- **Automated Interaction**: Ltrace allows you to pre-configure text for interaction with the target program. It automatically provides this input when the program reads from standard input, meaning you don't have to manually handle input prompts before the tracing can proceed.
 
-### 依赖
+### Notes
 
-注意：[libdebug](https://github.com/libdebug/libdebug/tree/d88a893963d02482e00d4516bdaf4f25a8c14c4b)  的使用还需要安装额外的依赖库，请到github页面根据系统信息安装。
+- Attaching to a process via PID requires appropriate permissions. You may need to disable YAMA's ptrace scope by running: `echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope`.
+- The tool automatically detects whether the target is an x86 (32-bit) or x64 (64-bit) binary.
+- You might see output like `"unknown_lib_function(ld-linux-x86-64.so.2)"`. This typically occurs because the function is an internal routine used by the dynamic linker and is not an exported symbol. It's recommended to use a binary analysis tool like IDA Pro or Ghidra for further investigation.
+- If you plan to modify Ltrace using the `libdebug` API, be aware that system stop events in `libdebug` may not be reliably triggered during a `step()` operation. This means you might not be able to intercept system calls or use other APIs that depend on stop events.
+- When analyzing C++ programs, you may encounter mangled symbol names like `_ZStlsISt11char_traitsIcEERSt13basic_ostreamIcT_ES5_PKc`. This is standard C++ name mangling. We plan to add automatic demangling in the future. For now, you can use the `c++filt` utility to demangle these names manually.
 
+### Dependencies
+
+**Note**: `libdebug` has additional system-level dependencies. Please visit the official [libdebug GitHub repository](https://github.com/libdebug/libdebug) and follow the installation instructions for your operating system.
+
+```Bash
+pip install capstone libdebug pwntools pyelftools
 ```
-pip install capstone libdebug pwntools pyelftools 
-```
 
-### 使用方法
+### Usage
+
+The help messages from the script have been translated below.
 
 ```
 usage: Ltrace.py [-h] (-f FILE | -p PID) [-F FILEPATH] [-s START] [-m MAX_TRACE] [-e [ENV ...]] [-o OUTPUT] [-i [INPUT ...]] [-pa {0,1}] [-a ...]
 
-Linux trace tool
+A simple instruction tracer for Linux ELF binaries.
 
 options:
   -h, --help            show this help message and exit
-  -f FILE, --file FILE  需要启动的程序路径
-  -p PID, --pid PID     要attach的进程ID
+  -f FILE, --file FILE  The path of the program to execute and trace.
+  -p PID, --pid PID     The Process ID (PID) to attach to for tracing.
   -F FILEPATH, --filepath FILEPATH
-                        程序文件路径(在通过pid附加时必须使用，通过文件启动请使用 -f)
+                        The program's file path (required when attaching with -p/--pid).
   -s START, --start START
-                        可选参数，开始追踪的地址(十六进制，整数)，默认从入口点开始
+                        Optional: The address (hex or int) to start tracing from. Defaults to the entry point.
   -m MAX_TRACE, --max-trace MAX_TRACE
-                        可选参数，最大的追踪数量，默认100000条
+                        Optional: The maximum number of instructions to trace. Defaults to 1,000,000.
   -e [ENV ...], --env [ENV ...]
-                        程序运行需要的环境变量，多个环境变量以空格分隔，例如, KEY1=VAL1 KEY2=VAL2
+                        Optional: Environment variables for the program, e.g., KEY1=VAL1 KEY2=VAL2.
   -o OUTPUT, --output OUTPUT
-                        可选参数，指定输出的文件路径,默认 ./Ltrace.asm
+                        Optional: The path for the output trace file. Defaults to ./Ltrace.asm.
   -i [INPUT ...], --input [INPUT ...]
-                        可选参数，程序使用标准输入流需要输入的数据，多个数据用空格分隔,例如: data1 data2 data3
+                        Optional: Data to send to the program's standard input, separated by spaces.
   -pa {0,1}, --pass-antidebug {0,1}
-                        可选参数，是否启动绕过反调试功能，0表示不绕过，1表示绕过，默认不绕过
-  -a ..., --args ...    可选参数，添加程序的启动参数，只有再选择通过文件启动才有效，多个参数用空格分隔(只能放在最后一个参数)
+                        Optional: Enable anti-debugging bypass. 0=disabled, 1=enabled. Default: 0.
+  -a ..., --args ...    Optional: Arguments for the program being traced. This must be the final option provided.
 ```
 
-### 效果展示
 
-推荐使用vscode中的插件ASM Code Lens浏览asm文件。
 
-r3ctf2025中的got表混淆
+### Demo
+
+It is recommended to use the **ASM Code Lens** extension in VS Code for viewing the output `.asm` file.
+
+**De-obfuscating a GOT in r3ctf2025:**
 ![](./png/Snipaste_2025-07-23_22-08-02.png)
 
-ptrace反调试绕过
+**`ptrace` Anti-Debugging Bypass:**
 ![](./png/Snipaste_2025-07-24_20-39-31.png)
 
-### 未来计划
 
-1.添加更多的反调试绕过功能
+### Future Plans
 
-2.性能优化
 
-3.跳转提示
 
-4.内存dump
+1. Add more anti-debugging bypasses.
+2. Implement performance optimizations.
+3. Add jump indicators to show where conditional jumps are headed.
+4. Develop full memory dumping functionality.
+5. Incorporate automatic string recognition from memory.
+6. Integrate automatic C++ symbol demangling.
+7. Add support for resolving symbols from libraries loaded at runtime (via `dlopen`).
 
-5.字符串识别
+------
 
-6.c++符号解析
 
-7.支持识别临时加载库的符号
 
----
+### Acknowledgments
 
-### 感谢
-[libdebug](https://github.com/libdebug/libdebug/tree/d88a893963d02482e00d4516bdaf4f25a8c14c4b)
 
-[capstone](https://github.com/capstone-engine/capstone)
+
+- [libdebug](https://github.com/libdebug/libdebug/tree/d88a893963d02482e00d4516bdaf4f25a8c14c4b)
+- [Capstone Engine](https://github.com/capstone-engine/capstone)
