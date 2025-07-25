@@ -3,13 +3,13 @@ Ltrace 是一个在linux x86_x64下基于capstone和libdebug开发的指令trace
 
 Ltrace支持通过文件直接启动或者pid附加进行，支持添加启动参数和环境变量，可以指定位置开始追踪，并且添加用于标准输入流的交互数据。
 
-目前项目还在努力完善中，难免会有bug，如有问题可在issue中提出。
+目前项目还在努力完善中，如有问题欢迎在issue中提出。
 
 ### 特点
 
 - 快速：Ltrace 使用libdebug进行程序流的追踪和内存访问， 通过capstone进行轻量级反汇编，拥有大约18秒追踪十万执行流的能力(可能因为系统性能有所不同)。
 - 标准库函数符号：通过对程序的依赖库解析和流程进行追踪，实时获取标准库符号，这使得执行程序可以简洁地显示标准库函数的符号，并且省略进入标准库的执行内容。在未来我们计划优化C++程序的标准符号解析。
-- 抗标准函数名称混淆：Ltrace 对链接器的流程进行了处理，可以直接输出通过plt和got第一次获取函数时，链接器获取的标准函数，这让Ltrace 拥有了对抗got表标准函数名混淆的能力，同时也因为Ltrace只解析真正执行的函数符号，而不是程序自带的函数符号。
+- 抗标准函数名称混淆：Ltrace 对链接器的流程进行了处理，可以直接输出通过plt和got第一次获取函数时，链接器获取的标准函数。这让Ltrace 拥有了对抗got表标准函数名混淆的能力，同时也因为Ltrace只解析真正执行的函数符号，而不是程序自带的函数符号。
 - 详细的寄存器：我们在追踪过程中详细地打印了寄存器地值，便于您观察数据地变化。
 - 显示内存中的值：通过libdebug实现了获取内存中的内容，而不仅仅是寄存器中的值，未来我们还计划添加内存查看和字符串识别功能。
 - 反反调试：Ltrace 提供了绕过ptrace的功能，这可以让Ltrace绕过基础的反调试，我们在未来也计划添加更多的反调试绕过功能。
@@ -36,7 +36,7 @@ pip install capstone libdebug pwntools pyelftools
 ### 使用方法
 
 ```
-usage: Ltrace_x64.py [-h] (-f FILE | -p PID) [-F FILEPATH] [-s START] [-m MAX_TRACE] [-e [ENV ...]] [-o OUTPUT] [-i [INPUT ...]] [-pa {0,1}] [-a ...]
+usage: Ltrace.py [-h] (-f FILE | -p PID) [-F FILEPATH] [-s START] [-m MAX_TRACE] [-e [ENV ...]] [-o OUTPUT] [-i [INPUT ...]] [-pa {0,1}] [-a ...]
 
 Linux trace tool
 
